@@ -1,0 +1,177 @@
+---
+title: "Using Data to Change the World: How Data Science can Help Solve 21st Century Development Goals"
+author: "Cole Molloy"
+date: "May 8, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Why Data Science
+Humans have been doing data science since long before the computer. If a grocery store notice that over a year they've contantly run out of ginger, so maybe next year they get more ginger. This is the crux of data science--using data, in this case constantly running out of ginger, to make some sort of claim, there is not enough ginger in the store regularly, and in this case proposing an action to change the trend, getting more ginger. While this is a very basic example of data science, the invention and subsequent advancements of computers have allowed data scientists to get exponentially more data and do significantly more analysis with it than ever before. For this tutorial, I will run through the basics of a data science process, where we will investigate how fertility rates, infant mortality, arable land and time affects GDP per capita within countries.
+
+The reason I want to look at these in particular is that they coincide with the [Millennium Development Goals](http://www.un.org/millenniumgoals/), goals created by the United Nations to encourage the development of underdeveloped countries. By looking at variables very closely related to the goals, we can see if they affect the economic development of countries (through GDP per Capita). Additionally, we can explore how  
+
+# Getting your Data
+The most important part of any data science project is the data. The analysis of said data is incredibly importent, but analysis means nothing if it is done on a dataset that is uncredible, or if you obtain data that is irrelevant to your goal of the data analysis, any analysis is also irrelevant. So what does it take to get good data? Knowing what you want your data to accomplish, then collecting your data from credible sources and modifying it to meet your needs. 
+
+### Choosing Relevant Data  
+Imagine you want to explore how ice cream prices will change in your state of Hawaii. Now you want to find data to start your analysis, so you find a thoroughly detailed dataset of ice cream prices in an ice cream shop. The issue is, the dataset you found is for Anchorage, Alaska. While there may be some correlation between the two, you are probably better off continuing your search for a more applicable dataset. This process often begins a question. In the above example, the question is how will ice cream prices change over time in Hawaii. For us, we want to look at how variables such as fertility rate and life expectancy affect GDP in countries around the world. Once you have your question, then you can start looking for data. For this question we will be getting our data from the [World Bank Organization](https://data.worldbank.org/).  We load it using read.csv(), and then display it using slice() from the dplyr package. While this data comes in the form of a csv file, it's entirely possible for data to not come from a csv file. The process for getting data directly from a website is called data scraping. A good website to learn more about data scraping can be found [here](https://www.analyticsvidhya.com/blog/2017/03/beginners-guide-on-web-scraping-in-r-using-rvest-with-hands-on-knowledge/).
+```{r uploadingData}
+library(dplyr)
+data<-read.csv("WBO_Data.csv",na.strings="..",fileEncoding="UTF-8-BOM",check.names=FALSE)
+slice(data,1:10)
+```
+### Tidying Data
+While this data has all the variables and dates we want, it isn't quite in the form we want quite yet. One of the most common ways to express data is as a tidy dataset. A tidy dataset is a data set where each attribute or variable forms a column, each entity or observation forms a row (in this data set its a year country tuple) and each type of entity (there's only one in this case) forms a table. In this data set, it's clear that the variables are forming rows, and the observations are the year columns, so we have to swap them. By creating a new list of dataframes indexed by the variables, it makes it relatively simple to then use that dataframe to recreate the dataframe with years being part of each observation and variables now being in the columns.
+
+```{r cleanUpData2}
+library(tidyverse)
+data<-slice(data,1:13728)
+variables<-as.list(levels(data$Variable))
+for(i in levels(data$Variable)){
+  variables[[i]]<-filter(data,Variable==i)
+}
+
+colNames <- c("country","year",levels(data$Variable))
+colNames <- colNames[-3]
+
+nc <- length(levels(data$Variable))+1
+nr <- 50*length(levels(factor(data$Country))[-1])
+df <- data.frame(matrix(NA, ncol = nc, nrow = nr)) 
+colnames(df)<-colNames
+count <- 1
+count3 <- 1
+for(i in (levels(factor(data$Country)))){
+  for(j in 1968:2017){
+    df[count,1]<-i
+    df[count,2]<-j
+    count2 <- 3
+    for(k in levels(data$Variable)[-1]) {
+        df[count,count2]<-variables[[k]][[as.character(j)]][count3]
+        count2 <- count2+1
+    }
+    count <- count + 1 
+  }
+  count3 <- count3 + 1
+}
+slice(df,1:10)
+```
+### Modifying Data
+Another helpful part of data processing is the mutate function. What mutate does is add an additional column to your dataframe, often created relative to the other variables in the dataset. The first instance is a simple mutate, where we use the countrycode function to apply a continent variable to each row. The second instance of mutate creates a new gdp per capita column, because the one in the data set is missing a lot of data, whereas we have gdp and population, so with a simple calculation, we can get gdp per capita. The final set of code exists to split the data into quartiles based on gdp per capita for use in the next section. It uses group_by to get only the countries represented in the data and then uses summary to find the quartiles of GDP per capita. The inner_join method combines our calculated quartiles for each country with their respective row in the main dataframe, df.
+```{r modifyingData, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(countrycode)
+df<-df%>%
+  mutate(continent=countrycode(country,"country.name","continent"))
+
+df<-df%>%
+  mutate(`GDP Per Capita`=`GDP (current US$)`/`Population, total`)
+
+statCountry<-df %>%
+      group_by(country) %>%
+      summarise(meanGDP=mean(`GDP Per Capita`,na.rm=TRUE))
+statCountry$meanAll<-median(statCountry$meanGDP,na.rm = TRUE)
+statCountry$first<-summary(statCountry$meanGDP)[2]
+statCountry$third<-summary(statCountry$meanGDP)[5]
+statCountry<-statCountry %>% 
+  mutate(quartile=ifelse(meanGDP<(first),"1st",
+                          ifelse((meanGDP<meanAll),"2nd",
+                          ifelse(meanGDP<(third),"3rd","4th"))))
+df<-inner_join(df,as.data.frame(statCountry))
+slice(df,1:10)
+```
+
+# Exploratory Data Analysis
+An important part of analyzing your recently curated and managed data is visualizing the data. Humans cannot begin to comprehend the trends within huge datasets of data that are just in a table. It has to be converted into a digestible format for the data scientist. This format could be a visualization, such as a boxplot or scatterplot, or some sort of value such as mean or median that can help you get an idea of what your data is doing, eventually leading you to a hypothesis that you can then test using means discussed in a later section.
+## Good Practices for Visualization
+For all of are visualizations, we will be using the [ggplot2](https://www.rstudio.com/wp-content/uploads/2015/03/ggplot2-cheatsheet.pdf) package. This package provides many tools and features for visualizing data that is in a tidy format; in fact, part of the reason we tidied our data to begin with is to make use of packages such as ggplot2 when analysing the data.
+Let's take a look at what happens if I just put all the data for fertility into a scatter plot.
+```{r badVisualization, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(ggplot2)
+df %>%
+  ggplot(mapping = aes(x=year,y=`Fertility rate, total (births per woman)`)) +
+    geom_point()
+```
+It is very difficult to perform any kind of analysis on this data, because the plot is so crowded and there's no way to tell trends or distributions. While graphical methods like ggplot are great tools to visualizing data, it is still the responsibility of the data scientist to understand what makes a graph readable. One important aspect of making a graph is not overcrowding the graph with too many things too look at. It is important for graphs to be clear in what they are trying to convey.  
+Let's try the same plot again with a couple added features:
+```{r betterVisualization, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(ggplot2)
+df %>%
+  subset(!is.na(quartile))%>%
+  ggplot(mapping = aes(x=year,y=`Fertility rate, total (births per woman)`,color=quartile, na.rm=TRUE)) +
+    geom_point() + geom_smooth(method=lm)
+```
+While the graph still has just as many points, it is much more readable and we can actually make some hypotheses with it. Firstly, looking at the slope of each best fit line shows that we can suppose that as year increases, fertility decreases. Additionally, the clear blocks of data and differences between the lines of best fit for the colored quartiles means that we can suppose that fertility and GDP are somehow related.
+
+While we already have a hypothesis for testing, different projects require different kinds of plots depending on what you want the plot to do.  
+If you also were interested in looking at a variable as it changes for a single entity, that can easily be attained through use of the filter function. Looking at China's fertility over time one can see a rapid decrease over time. Interestingly enough however, using the geom_vline function we can see that a couple years after the beginning of the "one-child" policy in China, the fertility rate stabilized and even grew a little bit. Seeing this, a researcher might begin to delve into other factors into why attempting to artificially lower fertility rate initially had the opposite effect.
+```{r simpleVisualization2, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(ggplot2)
+df %>% filter(country=="China") %>%
+  ggplot() +
+    geom_point(mapping = aes(x=year,y=`Fertility rate, total (births per woman)`))+ geom_vline(xintercept=1979)
+```
+Another common form of visualization is distribution based plots. Box plots are the most common form of these, but I prefer violin plots due to their larger amount of detail. From the violin plot based on fertility rates every 5 years, it appears the data shifted from a large range and slightly skewed downwards and bimodal to being unimodal and largely skewed upwards. Graphs such as this can be helpful if you want to explore a change over time particularly, as you can see how the distribution moves very clearly.
+```{r simpleVisualization3, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(ggplot2)
+df %>% filter(year %in% c("1965","1970","1975","1980","1985","1990","1995","2000","2005","2010","2015")) %>%
+  ggplot(mapping = aes(x=factor(year),y=`Fertility rate, total (births per woman)`)) +
+    geom_violin()
+```
+# Machine and Statistical Learning
+The idea of machine learning is fitting a model to our data so we can see how a single variable changes in relation to other variables. This is the crux of our analysis and is where we can begin to make definitive statements about what truly affects the relative wealth of the citizens of countries. For this dataset, we will look at linear regression models to predict how gdp will change. Our first linear regression model will be a univariate model, meaning there's only one variable it is based on. Our first model will be based on time, because we can hypothesize that gdp per capita increases as time increases based on the plot below.
+```{r Visualization2, incude=FALSE,cache=FALSE,message=FALSE,warning=FALSE}
+library(ggplot2)
+df %>%
+  ggplot(mapping = aes(x=year,y=`GDP Per Capita`)) +
+    geom_point()+geom_smooth(method=lm,color="red")
+```
+The lm method allows us to fit a linear model to a variable within our model based on the other variables in the model. The tidy function within the broom package then takes that model and outputs a readable dataframe with the information we need to interpret the model.
+```{r linearRegression1}
+library(broom)
+fit=lm(`GDP Per Capita`~year,data=df)
+tidy(fit)
+
+```
+The two most important parts of this data table are the estimate for year and the p.value. Because the p.value is extremely low for year we are able to reject the null hypothisis that no relationship exists between year and GDP per capita. The estimate for year also tells us that for each single increase in year, average GDP rises by 320.   
+
+Getting slightly more complicated, we now want to have a multivariate linear regression. We hypothisized in the exploratory data analysis portion that fertility rate is related to GDP per Capita so we create a linear model that is dependant on both year and fertility rate using the same lm function.
+```{r linearRegression2}
+fit2=lm(`GDP Per Capita`~year+`Fertility rate, total (births per woman)`,data=df)
+tidy(fit2)
+```
+We can once again see that the p-values are extremely low throughout the columns so we can say that this model is a good fit for the data. We also see in this model that for each increase of 1 in fertility rate, gdp per capita decreases by 2774 and for each year increase, gdp increases by 143.7.
+  
+Now go all the way back to our goal in this entire data analysis, we want to see how the various variables that closely relate
+```{r linearRegression3}
+fit3=lm(`GDP Per Capita`~year+`Fertility rate, total (births per woman)`+`Arable land (% of land area)`+`Life expectancy at birth, total (years)`+`Mortality rate, infant (per 1,000 live births)`
+       ,data=df)
+tidy(fit3)
+
+```
+Interestingly in this model fertility rate is no longer as reliable an indicator of GDP Per Capita, and arable land is also not a great indicator for GDP per capita, both depending on your threshold for what is acceptable, also called an alpha value. A typical alpha value is 0.05 which would mean all variables reject the null hypothesis.  
+We can test the model even more thoroughly using an f-test
+```{r fTest}
+fit3 %>% 
+  glance() %>%
+  select(r.squared, sigma, statistic, df, p.value) %>%
+  knitr::kable("html")
+```
+Because the statistic is above 1, we can definitively reject the hypothesis that no relationship exists between the response and predictors.  
+So which model should be used when actually predicting GDP per capita? Well we can also test that using anova() function.
+```{r linearRegression4}
+a1<-anova(fit)
+tidy(a1)
+a2<-anova(fit2)
+tidy(a2)
+a3<-anova(fit3)
+tidy(a3)
+```
+Because the df is different for each of the models due to availability of data for the variables, it is best to look at meansq value of the residuals when determining which is the best. In this case, the model with all the variables in it has the lowest mean square residual. This means that the distance between it and the actual data is smaller than in any of the other models, so it best represents the data.  
+
+# Conclusion
+
+Funnily enough, it does appear that the UN knows what it takes to see positive growth. In the model that alligned most closely with the millenium development goals, we saw the closest relationship with GDP per capita. What this suggests is that by focusing on development programs that also allign with our most accurate model, you are most likely to see gdp growth. Unfortunately however, we can only prove a correlation and not a causation. What this means is that we can't say for certain that lowering fertility rates or infant mortality rates will improve GDP per capita. What we can claim however, is that in environments with low infant mortality and low fertility rates you are also more likely to see higher GDP per capita. While this may seem unsatisfactory after so much work to arrive at a good regression model that agrees with the data, it is nearly impossible to prove causation for GDP per capita, which can be affected by so many more variables than the few we tested. What we can do, as our model confirmed, is encourage the creation of an environment within countries, where historically, GDP has flourished. More than just the importance of this specific experiment however, the skills of finding, modifying, presenting and analyzing data in this article are universal. At their very core all data are the same, and now hopefully you can take some of the vast troves of data found in the universe and apply the tools of a data scientist to make the world we live in make a little more sense.
+
+
